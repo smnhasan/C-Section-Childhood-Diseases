@@ -1,0 +1,719 @@
+ /* MICS 2019 */
+
+PROC CONTENTS DATA=WORK.IMPORT; 
+RUN;
+
+
+proc genmod data=WORK.IMPORT ;
+class C_Section(ref="0.00") HH1 stratum;
+model disease_count= C_Section /dist=negbin type3;
+weight wmweight;
+repeated subject = HH1(stratum);
+estimate 'Beta' C_Section 1 -1/ exp;
+run;
+
+proc surveyfreq data=WORK.IMPORT;
+      tables   HH7/ row chisq;
+      strata  stratum;
+      cluster HH1;
+      weight  wmweight;
+   run;
+
+
+proc genmod data=WORK.IMPORT ;
+class C_Section(ref="0.00") HH1 stratum  WAgeCat ReligionCat HH6 HH7 (ref="Barishal") EducationCat windex5 BMICategory
+MN36 HL4 AN4 SizeCategory (ref="1.00") WeightCategory;
+model disease_count = C_Section WAgeCat ReligionCat HH6 HH7  EducationCat windex5 BMICategory
+MN36 HL4 AN4 SizeCategory WeightCategory/dist=negbin type3;
+weight wmweight;
+repeated subject = HH1( stratum);
+estimate 'Beta' C_Section 1 -1/ exp;
+store p1;
+run;
+
+
+ods output ParameterEstimates = est;
+proc plm source = p1;
+  show parameters;
+run;
+
+data est_exp;
+  set est;
+  irr = exp(estimate);
+  if parameter ^="Intercept";
+   low_or=exp(estimate-1.96*stderr);
+hi_or=exp(estimate+1.96*stderr);
+run;
+proc print data = est_exp;
+
+run;
+
+proc print data=est_exp;
+ id Parameter irr low_or hi_or;
+run;
+
+proc means data = WORK.IMPORT median;
+var Disease_count; 
+run;
+   
+proc surveyfreq data=WORK.IMPORT;
+      tables   Disease_count / row chisq;
+      strata  stratum;
+      cluster HH1;
+      weight  wmweight;
+   run;
+
+data CS_disease_median;
+set WORK.IMPORT;
+if Disease_count=0 then Disease_Recode= 0 ;
+else if Disease_count=1 then Disease_Recode= 0 ;
+else if Disease_count=2 then Disease_Recode= 1 ;
+else if Disease_count=3 then Disease_Recode= 1 ;
+else if Disease_count=4 then Disease_Recode= 1 ;
+else if Disease_count=5 then Disease_Recode= 1 ;
+run;
+
+proc surveyfreq data=CS_disease_median;
+      tables   Disease_recode / row chisq;
+      strata  stratum;
+      cluster HH1;
+      weight  wmweight;
+   run;
+   
+ /*  propensity score - logistic */
+
+proc genmod data=CS_disease_median desc;
+class C_Section (ref='0.00') HH1 Stratum;
+model disease_recode = c_section /dist=bin link=logit type3 ;
+weight Wmweight;
+repeated subject = HH1(stratum);
+ESTIMATE 'ODDS' c_section 1 -1/EXP;
+run;
+
+
+/* Create Propensity Scores */
+proc logistic data=CS_disease_median ;
+class WAgeCat ReligionCat HH6 HH7 EducationCat windex5 BMICategory
+MN36 HL4 AN4 SizeCategory WeightCategory ;
+model C_Section  = WAgeCat ReligionCat HH6 HH7 EducationCat windex5 BMICategory
+MN36 HL4 AN4 SizeCategory WeightCategory/ link=glogit rsquare;
+ output out = ps_los pred = ps xbeta=logit_ps;
+
+ /* Output the propensity score and the logit of the propensity
+score */
+run;
+
+proc genmod data=ps_los  ;
+class C_Section (ref='0.00') HH1 Stratum ;
+model disease_recode= C_Section ps/dist=poisson type3;
+weight Wmweight;
+repeated subject = HH1(stratum);
+estimate 'Beta' C_Section 1 -1/ exp;
+run;
+
+ /* MICS 2019 END */
+PROC CONTENTS DATA=WORK.IMPORT; 
+RUN;
+
+DATA WORK.CS_Age2;
+  SET WORK.IMPORT;
+  IF AG2 > 1 THEN DELETE ;
+RUN;
+
+data renamedata;
+set WORK.CS_Age2;
+rename HH1= Cluster_Number
+AG1M = Birth_Month
+Breastfeed_cat = Breastfed
+BMI = BMI
+ZBMI = BMI_Z_Score
+HAZ2 = Height_Z_Score
+WAZ2 = Weight_Age_Z_Score
+WHZ2 = Weight_Height_Z_Score
+HL4 = Sex
+AG2 = Child_Age_year
+CAGE = Child_Age_month
+CAGE_6 = Child_AGE_6
+melevel = Mothers_Education
+religion = Religion
+chweight = child_Sample_weight
+windex5= Wealth_Index
+MA2 = Father_Age
+MN4A = Blood_Pressure
+MN19N = C_Section
+MN20 = Size_of_child
+MN21 = Child_Weight
+MN27A = Milk
+MN27B = PlainWater
+MN27C = Sugar
+MN27E= Sugar_Salt
+MN27F = Juice
+MN27G = Infant_Formula
+MN27H = Tea
+MN27I = Honey
+MN27X = Drink_Other
+IS2A = Not_Drinkable
+IS2B = Becomes_Sicker
+IS2C = Develops_Fever
+IS2D = Fast_Breathing
+IS2E= Difficult_Breathing
+IS2F = Blood_in_Stools
+IS2G = Drinking_Poorly
+IS2H = Diarrhoea_Ever
+IS2X = Other_Disease1
+IS2Y = Other_Disease2
+IS2Z = Other_Disease3
+wmweight = Women_Sample_weight
+PSU = PSU
+
+HH7 = Division
+MN18 = Place_of_delivery
+WB2_cat = Age_of_woman
+HH6 = Area   
+UN10 = Able_to_pregnant
+MN22 = Weight_at_birth
+MN6 = tetanus_toxoid
+helevel = hh_Education
+strata= strata;
+
+data CS_NoMiss ;
+set renamedata;
+
+*create new weight variable;
+Wmweight_sample = women_sample_weight/100000;
+label wmweight_sample = 'Women weight divided by 100000';
+
+*handling missing values;
+if MN20=8 then MN20= . ;
+if MN20=9 then MN20= . ;
+if Birth_Month=98 then Birth_Month= . ;
+if Birth_Month=99 then Birth_Month= . ;
+if Breastfed=9 then Breastfed= . ;
+if Breastfed=8 then Breastfed= . ;
+if BMI=99.9 then BMI= . ;
+if BMI=99.99 then BMI= . ;
+if BMI_Z_Score=99.99 then BMI_Z_Score= . ;
+if BMI_Z_Score=99.98 then BMI_Z_Score= . ;
+if BMI_Z_Score=99.97 then BMI_Z_Score= . ;
+
+if Height_Z_Score=99.99 then Height_Z_Score= . ;
+if Height_Z_Score=99.98 then Height_Z_Score= . ;
+if Height_Z_Score=99.97 then Height_Z_Score= . ;
+if Weight_Age_Z_Score=99.99 then Weight_Age_Z_Score= . ;
+if Weight_Age_Z_Score=99.98 then Weight_Age_Z_Score= . ;
+if Weight_Age_Z_Score=99.97 then Weight_Age_Z_Score= . ;
+if Weight_Height_Z_Score=99.99 then Weight_Height_Z_Score= . ;
+if Weight_Height_Z_Score=99.98 then Weight_Height_Z_Score= . ;
+if Weight_Height_Z_Score=99.97 then Weight_Height_Z_Score= . ;
+if Mothers_Education=9 then Mothers_Education= . ;
+if Wealth_Index=0 then Wealth_Index= . ;
+if Father_Age=98 then Father_Age= . ;
+if Father_Age=99 then Father_Age= . ;
+if Blood_Pressure=9 then Blood_Pressure= . ;
+if C_Section=9 then C_Section= . ;
+if C_Section=. then C_Section= "" ;
+if Child_Weight=9 then Child_Weight= . ;
+if Child_Weight=8 then Child_Weight= . ;
+
+
+if Becomes_Sicker="?" then Becomes_Sicker= "" ;
+if Develops_Fever="?" then Develops_Fever= "" ;
+if Fast_Breathing="?" then Fast_Breathing= "" ;
+if Difficult_Breathing="?" then Difficult_Breathing= "" ;
+if Blood_in_Stools="?" then Blood_in_Stools= "" ;
+if Drinking_Poorly="?" then Drinking_Poorly= "" ;
+if Diarrhoea_Ever="?" then Diarrhoea_Ever= "" ;
+if Other_Disease1="?" then Other_Disease1= "" ;
+if Other_Disease2="?" then Other_Disease2= "" ;
+if Other_Disease3="?" then Other_Disease3= "" ;
+if hh_Education=9 then hh_Education= . ;
+if tetanus_toxoid = 8 then tetanus_toxoid = . ;
+if tetanus_toxoid = 9 then tetanus_toxoid = . ;
+if Able_to_pregnant=8 then Able_to_pregnant= . ;
+if Able_to_pregnant=9 then Able_to_pregnant= . ;
+if Place_of_delivery=99 then Place_of_delivery= . ;
+
+if Weight_at_birth = 9 then Weight_at_birth = . ;
+if Weight_at_birth = . then Weight_at_birth = "" ;
+  
+    BMI_category = .;
+  IF (BMI<12.91) THEN BMI_category = 1;
+  IF (BMI>=12.91) and (BMI<17.08) THEN BMI_category = 2;
+  IF (BMI>=17.08) and (BMI<99.9) THEN BMI_category = 3;
+  IF (BMI>=99.9) THEN BMI_category = 4;
+  
+  Bmicat_new = "";
+      if BMI_category =1 then Bmicat_new = 1 ;
+      if BMI_category =2 then Bmicat_new= 2 ;
+      if BMI_category =3 then Bmicat_new =3;
+      if BMI_category =4 then Bmicat_new = 3 ;
+      
+      Mothers_Education_new = "";
+      if Mothers_Education =1 then Mothers_Education_new = 1 ;
+      if Mothers_Education =2 then Mothers_Education_new= 2 ;
+      if Mothers_Education =3 then Mothers_Education_new =2;
+      if Mothers_Education =4 then Mothers_Education_new = 3 ;
+      if Mothers_Education =5 then Mothers_Education_new = 4 ;
+      
+      religion_new = .;
+      if Religion =1 then religion_new = 1 ;
+      if Religion =2 then religion_new = 2 ;
+      if Religion =3 then religion_new = 2 ;
+      if Religion =4 then religion_new = 2 ;
+      if Religion =5 then religion_new = 2 ;
+      if Religion =6 then religion_new = 2 ;
+      
+      IF WB2 = . THEN wcat = .;
+	  ELSE IF WB2 >= 15 and WB2 <= 19 THEN wcat = 1;
+  	  ELSE IF WB2 >= 20 and WB2 <= 34 THEN wcat = 2;
+      ELSE IF WB2 > 24 THEN wcat = 3;
+run;
+
+
+data CS_disease;
+set CS_NoMiss;
+
+
+if Develops_Fever='C' then D1=1;
+if Fast_Breathing='D' then D2=1;
+if Difficult_Breathing='E' then D3=1;
+if Diarrhoea_Ever='H' then D4=1;
+if Blood_in_Stools='F' then D5=1;
+if Other_disease=1 then D6=1;
+
+if Develops_Fever='' then D1=0;
+if Fast_Breathing='' then D2=0;
+if Difficult_Breathing='' then D3=0;
+if Diarrhoea_Ever='' then D4=0;
+if Blood_in_Stools='' then D5=0;
+if Other_disease='' then D6=0;
+
+Disease_count = d1 +d2 +d3  +d4 +d5 +d6;
+drop d1 d2 d3 d4 d5 d6 ;
+label Disease_count = 'Disease_count for each individual';
+run;
+
+proc means data = CS_disease median;
+var Disease_count; 
+run;
+
+proc surveyfreq data=CS_disease;
+      tables   Disease_count / row chisq;
+      strata  strata;
+      cluster Cluster_Number;
+      weight  Women_Sample_weight;
+   run;
+
+
+data CS_disease_median;
+set CS_disease;
+if Disease_count=0 then Disease_Recode= 0 ;
+if Disease_count=1 then Disease_Recode= 0 ;
+else if Disease_count=2 then Disease_Recode= 0 ;
+else if Disease_count=3 then Disease_Recode= 1 ;
+else if Disease_count=4 then Disease_Recode= 1 ;
+else if Disease_count=5 then Disease_Recode= 1 ;
+else if Disease_count=6 then Disease_Recode= 1 ;
+label Disease_Recode = 'Disease_Recode by median of disease count';
+run;
+
+proc genmod data=CS_disease_median ;
+class C_Section(ref="0.00") Cluster_Number strata;
+model disease_count= C_Section /dist=negbin type3;
+weight Women_Sample_weight;
+repeated subject = Cluster_Number(strata);
+estimate 'Beta' C_Section 1 -1/ exp;
+run;
+
+proc surveyfreq data=CS_disease_median;
+      tables   Disease_recode / row chisq;
+      strata  strata;
+      cluster Cluster_Number;
+      weight  Women_Sample_weight;
+   run;
+
+proc genmod data=CS_disease_median ;
+class C_Section(ref='0.00') Cluster_Number strata Religion_new 
+Breastfed (ref='1.00') Sex Mothers_Education (ref='5') Child_Age_year (ref='0')
+Bmicat_new (ref='1') Wealth_Index (ref='2') wcat (ref="2")  Area Division (ref='60')
+Size_of_child (ref='1') LBW (ref='1.00') ;
+model disease_count = C_Section Religion_new Breastfed Sex Mothers_Education Child_Age_year 
+Bmicat_new Wealth_Index wcat Area Division Size_of_child  LBW/dist=negbin type3;
+weight Women_Sample_weight;
+repeated subject = Cluster_Number(strata);
+estimate 'Beta' C_Section 1 -1/ exp;
+store p1;
+run;
+
+
+ods output ParameterEstimates = est;
+proc plm source = p1;
+  show parameters;
+run;
+
+data est_exp;
+  set est;
+  irr = exp(estimate);
+  if parameter ^="Intercept";
+   low_or=exp(estimate-1.96*stderr);
+hi_or=exp(estimate+1.96*stderr);
+run;
+proc print data = est_exp;
+
+run;
+
+proc print data=est_exp;
+ id Parameter irr low_or hi_or;
+run;
+
+ /*  propensity score - logistic */
+
+proc genmod data=CS_disease_median desc;
+class C_Section (ref='0') Cluster_Number strata;
+model disease_recode = c_section /dist=bin link=logit type3 ;
+weight Women_Sample_weight;
+repeated subject = Cluster_Number(strata);
+ESTIMATE 'ODDS' c_section 1 -1/EXP;
+run;
+
+
+/* Create Propensity Scores */
+proc logistic data=CS_disease_median ;
+class Religion Breastfed Sex Mothers_Education Child_Age_year BMI_category Wealth_Index;
+model C_Section  = Religion Breastfed Sex Mothers_Education Child_Age_year BMI_category 
+Wealth_Index LBW/ link=glogit rsquare;
+ output out = ps_los pred = ps xbeta=logit_ps;
+
+ /* Output the propensity score and the logit of the propensity
+score */
+run;
+
+proc genmod data=ps_los  ;
+class C_Section(param=ref ref=last)  Cluster_Number strata ;
+model disease_recode= C_Section ps/dist=poisson type3;
+weight Women_Sample_weight;
+repeated subject = Cluster_Number(strata);
+estimate 'Beta' C_Section 1 -1/ exp;
+run;
+
+
+ /*  BDHS DATA */
+
+PROC CONTENTS DATA=WORK.IMPORT1; 
+RUN;
+
+*handling missing values;
+data brr;
+set WORK.IMPORT1;
+   if      V106=9 then V106=.;
+   if      V130=99 then V130=.;
+   if      V730=99 then V730=.;
+	if      V730=98 then V730=.;
+   if      V159=9 then V159=.;
+   if      V157=9 then V157="";
+   if      V445=9999 then V445=.;
+   if      V716=99 then V716=.;
+   	if      V716=98 then V716=.;
+   if       M17=9 then M17="";
+   if      V413=9 then V413=.;
+  	 if      V413=8 then V413=.;
+   if       M15=99 then M15="";
+   if       M18=9 then M18="";
+   	if       M18=8 then M18="";
+   if       M54=9 then M54="";
+   if M54="Don" then M54="";
+	if       M54=8 then M54=.;
+   if       H10=9 then H10="";
+      if H10="Don" then H10="";
+	if       H10=8 then H10=.;
+   if      HW15=9 then HW15=.;
+   if       HW2=9999 then HW2=.;
+   if      H12Z=9 then H12Z=.;
+   if      H11B=9 then H11B="";
+	if      H11B=8 then H11B=.;
+   if      H32Z=9 then H32Z="";
+   if      H31B=9 then H31B="";
+  	 if      H31B="Don" then H31B="";
+   if      H31C=9 then H31C="";
+  	 if      H31C=8 then H31C=.;
+  	 if      H31C="Don't know" then H31C="";
+  	 if V701 =9 then V701="";
+  	 if H11 =9 then H11="";
+  	 if H11 ="Don't know" then H11="";
+  	 if V704 = "Don't know" then V704 = "";
+  	 if BMIcat = 0 then BMIcat = .;
+  	 V005_new = V005/1000000;
+run;
+
+
+
+data brr2;
+set brr;
+*rename parants characteristics;
+rename 
+V013=mothers_age_cat
+V024=Division 
+V025= residence 
+V106= education
+V130=Religion
+V136= HH_members
+V730= fathers_age
+V157=newspaper
+V159=television
+V190=Wealth_index 
+V201=Total_children
+V213=Currently_pregnant
+V445=BMI
+V701 = fathers_edu
+V136 = HH_members
+V704 = HH_Occu
+V714 = mothers_work;
+*rename child characteristic;
+rename 
+M17=C_section
+B4=Sex_of_child
+HW1= age_child_month
+M15=Place_of_delivery 
+M18=Size_of_child_at_birth 
+M54=Vitamin_A
+H10=vaccination
+b8=age_child
+V404 = breastfeed;
+*rename risk factor;
+rename
+H11B=Blood_in_the_stools 
+H32Z=Fever_or_cough_medical_treatment 
+H31B=Short_rapid_breaths 
+H31C= chest_Nose
+H11 = Diarrhea
+
+v005_new = sample_weight
+V022 = strata;
+run;
+
+proc surveyfreq data = brr2;
+table edu_cat;
+run;
+
+DATA brr3;
+  SET brr2;
+  edu_cat_new = .;
+      if edu_cat ="0.00" then edu_cat_new = 1;
+      if edu_cat ="1.00" then edu_cat_new = 2;
+      if edu_cat ="2.00" then edu_cat_new = 3;
+      if edu_cat ="3.00" then edu_cat_new = 3;
+  
+ Place_of_delivery_cat = .;
+      if Place_of_delivery ="District hospital" then Place_of_delivery_cat = 2;
+      if Place_of_delivery ="Maternal and child welf" then Place_of_delivery_cat = 3 ;
+      if Place_of_delivery ="NGO static clinic" then Place_of_delivery_cat = 3;
+      if Place_of_delivery ="Other" then Place_of_delivery_cat = 3;
+      if Place_of_delivery ="Other NGO sector" then Place_of_delivery_cat = 3;
+      if Place_of_delivery ="Other public sector" then Place_of_delivery_cat = 2  ;
+      if Place_of_delivery ="Private hospital/clinic" then Place_of_delivery_cat = 3;
+      if Place_of_delivery ="Public hospital" then Place_of_delivery_cat = 2;
+      if Place_of_delivery ="Respondent's home" then Place_of_delivery_cat = 1;
+      if Place_of_delivery ="Upazila health & family" then Place_of_delivery_cat = 2;
+      if Place_of_delivery ="Upazila health complex" then Place_of_delivery_cat = 2;
+      
+      wage_cat_new = .;
+      if wage_cat ="1.00" then mothers_age_cat_new = 1;
+      if wage_cat ="2.00" then mothers_age_cat_new = 2;
+      if wage_cat ="3.00" then mothers_age_cat_new = 2;
+      if wage_cat ="4.00" then mothers_age_cat_new = 3;
+      if wage_cat ="5.00" then mothers_age_cat_new = 3;
+      if wage_cat ="6.00" then mothers_age_cat_new = 3;
+      if wage_cat ="7.00" then mothers_age_cat_new = 3;
+
+      
+      religion_new = "";
+      if religion_cat ="1" then religion_new = 1 ;
+      if religion_cat ="2"  then religion_new = 2 ;
+      if religion_cat ="3" then religion_new = 2 ;
+      if religion_cat ="4" then religion_new = 2 ;
+      
+      BMIcat = BMI/100;
+      
+      Bmicat_new = "";
+      if Bmicat < 18.5 then Bmicat_new = "Under" ;
+      if 18.5 <= Bmicat  & Bmicat<=24.9 then Bmicat_new= "Normal" ;
+      if 25 <= Bmicat  then Bmicat_new = "O" ;
+
+      
+      Size_of_child_at_birth_new = "";
+      if Size_of_child_at_birth ="Average" then Size_of_child_at_birth_new = "A" ;
+      if Size_of_child_at_birth ="Larger than average" then Size_of_child_at_birth_new= "L" ;
+      if Size_of_child_at_birth ="Smaller than average" then Size_of_child_at_birth_new = "S" ;
+      if Size_of_child_at_birth ="Very large" then Size_of_child_at_birth_new = "L" ;
+      if Size_of_child_at_birth ="Very small" then Size_of_child_at_birth_new = "S" ;
+run;
+
+
+
+proc genmod data=brr3 desc;
+class M17N (ref="0.00") V001 strata ;
+model disease_Count = M17N /dist=poisson link=log type3;
+weight Sample_weight;
+
+store p1;
+run;
+repeated subject = V001(strata);
+
+
+proc genmod data=brr3 desc;
+class M17N (ref="0.00") V001 strata ;
+model disease_Count = M17N /dist=negbin link=log type3;
+weight Sample_weight;
+repeated subject = V001(strata);
+store p1;
+run;
+
+ods output ParameterEstimates = est;
+proc plm source = p1;
+  show parameters;
+run;
+
+data est_exp;
+  set est;
+  irr = exp(estimate);
+  if parameter ^="Intercept";
+   low_or=exp(estimate-1.96*stderr);
+hi_or=exp(estimate+1.96*stderr);
+run;
+proc print data = est_exp;
+
+run;
+
+proc print data=est_exp;
+ id Parameter irr low_or hi_or;
+run;
+
+
+proc genmod data=brr3 ;
+class M17N (ref="0.00") breastfeed mothers_age_cat_new (ref="2") Division residence (ref="Rural") education(ref="No education")
+ Wealth_index BMIcat_new (ref="O") Sex_of_child (ref="Female") Size_of_child_at_birth age_child religion_new V001 strata;
+model disease_Count  = M17N breastfeed mothers_age_cat_new  Division residence 
+education wealth_index BMIcat_new Sex_of_child Size_of_child_at_birth age_child religion_new /dist=negbin link=log type3;
+weight Sample_weight;
+store p1;
+run;
+
+ods output ParameterEstimates = est;
+proc plm source = p1;
+  show parameters;
+run;
+
+data est_exp;
+  set est;
+  irr = exp(estimate);
+  if parameter ^="Intercept";
+   low_or=exp(estimate-1.96*stderr);
+hi_or=exp(estimate+1.96*stderr);
+run;
+proc print data = est_exp;
+
+run;
+
+proc print data=est_exp;
+ id Parameter irr low_or hi_or;
+run;
+
+proc means data = brr3  median ;
+var disease_Count; 
+run;
+
+
+
+data brr3_median;
+set brr3 ;
+if disease_Count=0then Disease_Recode= 0 ;
+if disease_Count=1 then Disease_Recode= 1;
+else if disease_Count=2 then Disease_Recode= 1;
+else if disease_Count=3 then Disease_Recode= 1 ;
+else if disease_Count=4 then Disease_Recode= 1 ;
+else if disease_Count=5 then Disease_Recode= 1 ;
+label Disease_Recode = 'Disease_Recode by median of disease count';
+run;
+
+proc surveyfreq data = brr3_median;
+table  Disease_Recode;
+run;
+
+
+/*  propensity score - logistic */
+
+proc genmod data=brr3_median desc;
+class M17N (param=ref ref=first) V001 strata;
+model Disease_Recode = M17N /dist=poisson link=log type3;
+weight Sample_weight;
+
+store p1;
+run;
+repeated subject = V001(strata);
+
+
+ods output ParameterEstimates = est;
+proc plm source = p1;
+  show parameters;
+run;
+
+data est_exp;
+  set est;
+  irr = exp(estimate);
+  if parameter ^="Intercept";
+   low_or=exp(estimate-1.96*stderr);
+hi_or=exp(estimate+1.96*stderr);
+run;
+proc print data = est_exp;
+
+run;
+
+proc print data=est_exp;
+ id Parameter irr low_or hi_or;
+run;
+
+
+
+
+/* Create Propensity Scores */
+proc logistic data=brr3_median ;
+class  breastfeed mothers_age_cat_new (ref="2")Division residence (ref="Rural") education(ref="No education")
+ Wealth_index BMIcat_new (ref="O") Sex_of_child (ref="Female") Size_of_child_at_birth age_child religion_new;
+model M17N  = breastfeed mothers_age_cat_new Division residence 
+education wealth_index BMIcat_new Sex_of_child Size_of_child_at_birth age_child religion_new/ link=glogit rsquare;
+ output out = ps_los pred = ps xbeta=logit_ps;
+
+ /* Output the propensity score and the logit of the propensity
+score */
+run;
+
+proc genmod data=ps_los  ;
+class M17N(ref='0.00') V001 strata;
+model Disease_Recode= M17N ps/dist=poisson link=log type3;
+weight Sample_weight;
+repeated subject = V001(strata);
+store p1;
+run;
+
+ods output ParameterEstimates = est;
+proc plm source = p1;
+  show parameters;
+run;
+
+data est_exp;
+  set est;
+  irr = exp(estimate);
+  if parameter ^="Intercept";
+   low_or=exp(estimate-1.96*stderr);
+hi_or=exp(estimate+1.96*stderr);
+run;
+proc print data = est_exp;
+
+run;
+
+proc print data=est_exp;
+ id Parameter irr low_or hi_or;
+run;
+
+
+
